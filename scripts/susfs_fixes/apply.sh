@@ -351,8 +351,8 @@ sed -i 's/if (security_dump_masked_av_fn)/if (\&security_dump_masked_av_fn)/g; s
 # 修复 2:启用 CONFIG_USER_NS(DroidSpaces 容器需要)
 DEFCONFIG_PATH="$KERNEL_ROOT/common/arch/arm64/configs/gki_defconfig"
 if [ -f "$DEFCONFIG_PATH" ] && ! grep -q "^CONFIG_USER_NS=y" "$DEFCONFIG_PATH"; then
-  echo "CONFIG_USER_NS=y" >> "$DEFCONFIG_PATH"
-  echo "已启用 CONFIG_USER_NS"
+  sed -i '/^CONFIG_NAMESPACES=y$/a CONFIG_USER_NS=y' "$DEFCONFIG_PATH"
+  echo "已启用 CONFIG_USER_NS(插入至 CONFIG_NAMESPACES 之后)"
 fi
 
 # 修复 3:SUSFS SUS_MAP hunk(6.12 上 show_smap 上下文失配)
