@@ -348,4 +348,22 @@ if [ "$KSU_VARIANT" == "Official" ] || [ "$KSU_VARIANT" == "Next" ] || [ "$KSU_V
   fi
 fi
 sed -i 's/if (security_dump_masked_av_fn)/if (\&security_dump_masked_av_fn)/g; s/if (context_struct_compute_av_fn)/if (\&context_struct_compute_av_fn)/g' "$KERNEL_ROOT/common/drivers/kernelsu/feature/selinux_hide.c" 2>/dev/null || true
+# 修复 2:启用 CONFIG_USER_NS(DroidSpaces 容器需要)
+DEFCONFIG_PATH="$KERNEL_ROOT/common/arch/arm64/configs/gki_defconfig"
+if [ -f "$DEFCONFIG_PATH" ] && ! grep -q "^CONFIG_USER_NS=y" "$DEFCONFIG_PATH"; then
+  echo "CONFIG_USER_NS=y" >> "$DEFCONFIG_PATH"
+  echo "已启用 CONFIG_USER_NS"
+fi
+
+# 修复 3:SUSFS SUS_MAP hunk(6.12 上 show_smap 上下文失配)
+if [[ "$ANDROID_VERSION" == "android16" && "$KERNEL_VERSION" == "6.12" ]]; then
+  TASK_MMU="$KERNEL_ROOT/common/fs/proc/task_mmu.c"
+  if [ -f "$TASK_MMU" ] && ! grep -qF 'SUSFS_IS_INODE_SUS_MAP' "$TASK_MMU"; then
+    if ! grep -qF '#include <linux/susfs_def.h>' "$TASK_MMU"; then
+      sed -i '0,/^#include /s//#if defined(CONFIG_KSU_SUSFS_SUS_KSTAT) || defined(CONFIG_KSU_SUSFS_SUS_MAP) || defined(CONFIG_KSU_SUSFS_OPEN_REDIRECT)\n#include <linux\/susfs_def.h>\n#endif\n&/' "$TASK_MMU"
+    fi
+    perl -0pi -e 's/(static int show_smap$struct seq_file \*m, void \*v$\s*\{.*?struct mem_size_stats mss = \{\};\n)/$1\n#ifdef CONFIG_KSU_SUSFS_SUS_MAP\n\tif (vma->vm_file) {\n\t\tif (SUSFS_IS_INODE_SUS_MAP(file_inode(vma->vm_file)))\n\t\t\treturn 0;\n\t}\n#endif\n/s' "$TASK_MMU"
+    echo "已修复 task_mmu.c SUS_MAP 检查"
+  fi
+fi
 
