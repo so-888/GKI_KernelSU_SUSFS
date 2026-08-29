@@ -347,3 +347,5 @@ if [ "$KSU_VARIANT" == "Official" ] || [ "$KSU_VARIANT" == "Next" ] || [ "$KSU_V
     fi
   fi
 fi
+sed -i 's/if (security_dump_masked_av_fn)/if (\&security_dump_masked_av_fn)/g; s/if (context_struct_compute_av_fn)/if (\&context_struct_compute_av_fn)/g' "$KERNEL_ROOT/common/drivers/kernelsu/feature/selinux_hide.c" 2>/dev/null || true
+
