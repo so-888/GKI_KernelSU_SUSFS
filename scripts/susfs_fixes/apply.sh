@@ -366,4 +366,17 @@ if [[ "$ANDROID_VERSION" == "android16" && "$KERNEL_VERSION" == "6.12" ]]; then
     echo "已修复 task_mmu.c SUS_MAP 检查"
   fi
 fi
+# 修复 WiFi:启用 cfg80211 无线子系统核心(defconfig 里被误关)
+DEFCONFIG_PATH="$KERNEL_ROOT/common/arch/arm64/configs/gki_defconfig"
+if [ -f "$DEFCONFIG_PATH" ]; then
+  if grep -q '^# CONFIG_CFG80211 is not set$' "$DEFCONFIG_PATH"; then
+    sed -i 's/^# CONFIG_CFG80211 is not set$/CONFIG_CFG80211=m/' "$DEFCONFIG_PATH"
+    echo "已启用 CONFIG_CFG80211=m"
+  fi
+  if grep -q '^# CONFIG_MAC80211 is not set$' "$DEFCONFIG_PATH"; then
+    sed -i 's/^# CONFIG_MAC80211 is not set$/CONFIG_MAC80211=m/' "$DEFCONFIG_PATH"
+    echo "已启用 CONFIG_MAC80211=m"
+  fi
+fi
+
 
