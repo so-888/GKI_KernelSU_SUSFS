@@ -378,5 +378,11 @@ if [ -f "$DEFCONFIG_PATH" ]; then
     echo "已启用 CONFIG_MAC80211=m"
   fi
 fi
+FRAG_PATH="$KERNEL_ROOT/common/arch/arm64/configs/ksu.fragment"
+if [ -f "$FRAG_PATH" ]; then
+  grep -q '^CONFIG_CFG80211=' "$FRAG_PATH" || echo "CONFIG_CFG80211=m" >> "$FRAG_PATH"
+  grep -q '^CONFIG_MAC80211=' "$FRAG_PATH" || echo "CONFIG_MAC80211=m" >> "$FRAG_PATH"
+  echo "已注入 CFG80211 / MAC80211 到 ksu.fragment"
+fi
 
 
