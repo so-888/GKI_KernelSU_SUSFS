@@ -359,27 +359,33 @@ if [ -f "$DEFCONFIG_PATH" ] && ! grep -q "^CONFIG_USER_NS=y" "$DEFCONFIG_PATH"; 
   echo "已启用 CONFIG_USER_NS"
 fi
 
-# ===== 修复 3:无线子系统 + 关闭 GKI 模块签名保护(修 WiFi/声音/震动) =====
-# 注意:必须写 gki_defconfig,不能写 ksu.fragment。
-# build.yml 的 `diff gki_defconfig.orig gki_defconfig` 会把 ksu.fragment 整体覆盖,
-# 写在 fragment 里的行会被丢掉;写在 gki_defconfig 才会被 diff 捕获进 fragment(USER_NS 即此路径)。
+# ===== 修复 3:关闭小米模块保护(修 WiFi/蓝牙/声音/震动 -EACCES) =====
+# 关键结论(对照原厂 stock_kernel_config.txt vs 自编译 custom_config.gz):
+#   两者的 CONFIG_MODULE_SIG_PROTECT 都是 =y,区别是 key:原厂签的是 OEM key,
+#   自编译用自动生成的新 key,于是 protected_module_names_list 里的原厂 vendor 模块
+#   (qca_cld3_wcn7750 / icnss / cnss 等)被内核拒载(-EACCES)。改 =n 放行。
+#   只改"值"、不改行位置,才不触发 savedefconfig 校验;CFG80211/MAC80211 原厂本就在
+#   vendor_dlkm 里以 .ko 提供,无需(也不应)写进树内,故这里不再注入。
 DEFCONFIG_PATH="$KERNEL_ROOT/common/arch/arm64/configs/gki_defconfig"
 if [ -f "$DEFCONFIG_PATH" ]; then
-  # 无线子系统核心(缺了内核就没有 wifi 能力)
-  grep -q '^CONFIG_CFG80211=' "$DEFCONFIG_PATH" || echo "CONFIG_CFG80211=m" >> "$DEFCONFIG_PATH"
-  grep -q '^CONFIG_MAC80211=' "$DEFCONFIG_PATH" || echo "CONFIG_MAC80211=m" >> "$DEFCONFIG_PATH"
-  # 关闭 GKI 模块符号保护(群友方案:让小米原厂签名模块能加载)
-  grep -q '^CONFIG_MODULE_SIG=' "$DEFCONFIG_PATH" || echo "CONFIG_MODULE_SIG=y" >> "$DEFCONFIG_PATH"
-  grep -q '^CONFIG_MODULE_SIG_FORCE=' "$DEFCONFIG_PATH" || echo "CONFIG_MODULE_SIG_FORCE=n" >> "$DEFCONFIG_PATH"
-  grep -q '^CONFIG_MODULE_SIG_PROTECT=' "$DEFCONFIG_PATH" || echo "CONFIG_MODULE_SIG_PROTECT=n" >> "$DEFCONFIG_PATH"
-  echo "已注入 CFG80211 / MAC80211 / MODULE_SIG 系列(gki_defconfig)"
+  if grep -q '^CONFIG_MODULE_SIG_PROTECT=' "$DEFCONFIG_PATH"; then
+    sed -i 's|^CONFIG_MODULE_SIG_PROTECT=.*|CONFIG_MODULE_SIG_PROTECT=n|' "$DEFCONFIG_PATH"
+  else
+    echo 'CONFIG_MODULE_SIG_PROTECT=n' >> "$DEFCONFIG_PATH"
+  fi
+  echo "已关闭 CONFIG_MODULE_SIG_PROTECT(=n)"
 fi
 
-# ===== 修复 3b:中性化 check_defconfig,避免追加/错位配置触发 savedefconfig 不匹配 =====
-# 追加到 gki_defconfig 末尾的配置若不在 Kconfig 顺序位,会让构建期的 savedefconfig 校验失败。
-# 直接 sed 掉 build.config* 里的 check_defconfig 调用即可(沿用已验证的处置)。
-for f in "$KERNEL_ROOT"/common/build.config* "$KERNEL_ROOT"/build.config*; do
-  [ -f "$f" ] || continue
-  sed -i '/check_defconfig/d' "$f" 2>/dev/null || true
-done
-echo "已中性化 build.config* 中的 check_defconfig"
+# ===== 修复 4:对齐 LOCALVERSION(修 vermagic 不匹配) =====
+# 关键结论:原厂是 CONFIG_LOCALVERSION="-4k"(不是 -android16-6-4k)。
+#   "-android16-6" 是 GKI 构建系统按 BRANCH/KMI 自动加的前缀,不该写进 LOCALVERSION;
+#   你自编译那份写成了 "-android16-6-4k" = 双重前缀,vermagic 才对不上。
+DEFCONFIG_PATH="$KERNEL_ROOT/common/arch/arm64/configs/gki_defconfig"
+if [ -f "$DEFCONFIG_PATH" ]; then
+  if grep -q '^CONFIG_LOCALVERSION=' "$DEFCONFIG_PATH"; then
+    sed -i 's|^CONFIG_LOCALVERSION=.*|CONFIG_LOCALVERSION="-4k"|' "$DEFCONFIG_PATH"
+  else
+    echo 'CONFIG_LOCALVERSION="-4k"' >> "$DEFCONFIG_PATH"
+  fi
+  echo "已对齐 CONFIG_LOCALVERSION=-4k(与原厂一致)"
+fi
