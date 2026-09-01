@@ -347,42 +347,27 @@ if [ "$KSU_VARIANT" == "Official" ] || [ "$KSU_VARIANT" == "Next" ] || [ "$KSU_V
     fi
   fi
 fi
+# ===== 修复 1:KernelSU selinux_hide.c clang -Wpointer-bool-conversion(编译必需,勿删) =====
 sed -i 's/if (security_dump_masked_av_fn)/if (\&security_dump_masked_av_fn)/g; s/if (context_struct_compute_av_fn)/if (\&context_struct_compute_av_fn)/g' "$KERNEL_ROOT/common/drivers/kernelsu/feature/selinux_hide.c" 2>/dev/null || true
-# 修复 2:启用 CONFIG_USER_NS(DroidSpaces 容器需要)
+
+# ===== 修复 2:CONFIG_USER_NS(DroidSpaces 容器需要) =====
+# 必须插在 CONFIG_NAMESPACES=y 之后,savedefconfig 才不会报位置不匹配
 DEFCONFIG_PATH="$KERNEL_ROOT/common/arch/arm64/configs/gki_defconfig"
 if [ -f "$DEFCONFIG_PATH" ] && ! grep -q "^CONFIG_USER_NS=y" "$DEFCONFIG_PATH"; then
   sed -i '/^CONFIG_NAMESPACES=y$/a CONFIG_USER_NS=y' "$DEFCONFIG_PATH"
-  echo "已启用 CONFIG_USER_NS(插入至 CONFIG_NAMESPACES 之后)"
+  echo "已启用 CONFIG_USER_NS"
 fi
 
-# 修复 3:SUSFS SUS_MAP hunk(6.12 上 show_smap 上下文失配)
-if [[ "$ANDROID_VERSION" == "android16" && "$KERNEL_VERSION" == "6.12" ]]; then
-  TASK_MMU="$KERNEL_ROOT/common/fs/proc/task_mmu.c"
-  if [ -f "$TASK_MMU" ] && ! grep -qF 'SUSFS_IS_INODE_SUS_MAP' "$TASK_MMU"; then
-    if ! grep -qF '#include <linux/susfs_def.h>' "$TASK_MMU"; then
-      sed -i '0,/^#include /s//#if defined(CONFIG_KSU_SUSFS_SUS_KSTAT) || defined(CONFIG_KSU_SUSFS_SUS_MAP) || defined(CONFIG_KSU_SUSFS_OPEN_REDIRECT)\n#include <linux\/susfs_def.h>\n#endif\n&/' "$TASK_MMU"
-    fi
-    perl -0pi -e 's/(static int show_smap$struct seq_file \*m, void \*v$\s*\{.*?struct mem_size_stats mss = \{\};\n)/$1\n#ifdef CONFIG_KSU_SUSFS_SUS_MAP\n\tif (vma->vm_file) {\n\t\tif (SUSFS_IS_INODE_SUS_MAP(file_inode(vma->vm_file)))\n\t\t\treturn 0;\n\t}\n#endif\n/s' "$TASK_MMU"
-    echo "已修复 task_mmu.c SUS_MAP 检查"
-  fi
-fi
-# 修复 WiFi:启用 cfg80211 无线子系统核心(defconfig 里被误关)
-DEFCONFIG_PATH="$KERNEL_ROOT/common/arch/arm64/configs/gki_defconfig"
-if [ -f "$DEFCONFIG_PATH" ]; then
-  if grep -q '^# CONFIG_CFG80211 is not set$' "$DEFCONFIG_PATH"; then
-    sed -i 's/^# CONFIG_CFG80211 is not set$/CONFIG_CFG80211=m/' "$DEFCONFIG_PATH"
-    echo "已启用 CONFIG_CFG80211=m"
-  fi
-  if grep -q '^# CONFIG_MAC80211 is not set$' "$DEFCONFIG_PATH"; then
-    sed -i 's/^# CONFIG_MAC80211 is not set$/CONFIG_MAC80211=m/' "$DEFCONFIG_PATH"
-    echo "已启用 CONFIG_MAC80211=m"
-  fi
-fi
+# ===== 修复 3:无线子系统 + 关闭 GKI 模块签名保护(修 WiFi/声音/震动) =====
+# 写在 ksu.fragment:不受 cp .orig 撤销,也不受 savedefconfig 位置校验
 FRAG_PATH="$KERNEL_ROOT/common/arch/arm64/configs/ksu.fragment"
 if [ -f "$FRAG_PATH" ]; then
+  # 无线子系统核心(缺了内核就没有 wifi 能力)
   grep -q '^CONFIG_CFG80211=' "$FRAG_PATH" || echo "CONFIG_CFG80211=m" >> "$FRAG_PATH"
   grep -q '^CONFIG_MAC80211=' "$FRAG_PATH" || echo "CONFIG_MAC80211=m" >> "$FRAG_PATH"
-  echo "已注入 CFG80211 / MAC80211 到 ksu.fragment"
+  # 关闭 GKI 模块符号保护(群友方案:让小米原厂签名模块能加载)
+  grep -q '^CONFIG_MODULE_SIG=' "$FRAG_PATH" || echo "CONFIG_MODULE_SIG=y" >> "$FRAG_PATH"
+  grep -q '^CONFIG_MODULE_SIG_FORCE=' "$FRAG_PATH" || echo "CONFIG_MODULE_SIG_FORCE=n" >> "$FRAG_PATH"
+  grep -q '^CONFIG_MODULE_SIG_PROTECT=' "$FRAG_PATH" || echo "CONFIG_MODULE_SIG_PROTECT=n" >> "$FRAG_PATH"
+  echo "已注入 CFG80211 / MAC80211 / MODULE_SIG 系列"
 fi
-
-
