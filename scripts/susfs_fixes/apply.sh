@@ -347,6 +347,7 @@ if [ "$KSU_VARIANT" == "Official" ] || [ "$KSU_VARIANT" == "Next" ] || [ "$KSU_V
     fi
   fi
 fi
+
 # ===== 修复 1:KernelSU selinux_hide.c clang -Wpointer-bool-conversion(编译必需,勿删) =====
 sed -i 's/if (security_dump_masked_av_fn)/if (\&security_dump_masked_av_fn)/g; s/if (context_struct_compute_av_fn)/if (\&context_struct_compute_av_fn)/g' "$KERNEL_ROOT/common/drivers/kernelsu/feature/selinux_hide.c" 2>/dev/null || true
 
@@ -359,15 +360,26 @@ if [ -f "$DEFCONFIG_PATH" ] && ! grep -q "^CONFIG_USER_NS=y" "$DEFCONFIG_PATH"; 
 fi
 
 # ===== 修复 3:无线子系统 + 关闭 GKI 模块签名保护(修 WiFi/声音/震动) =====
-# 写在 ksu.fragment:不受 cp .orig 撤销,也不受 savedefconfig 位置校验
-FRAG_PATH="$KERNEL_ROOT/common/arch/arm64/configs/ksu.fragment"
-if [ -f "$FRAG_PATH" ]; then
+# 注意:必须写 gki_defconfig,不能写 ksu.fragment。
+# build.yml 的 `diff gki_defconfig.orig gki_defconfig` 会把 ksu.fragment 整体覆盖,
+# 写在 fragment 里的行会被丢掉;写在 gki_defconfig 才会被 diff 捕获进 fragment(USER_NS 即此路径)。
+DEFCONFIG_PATH="$KERNEL_ROOT/common/arch/arm64/configs/gki_defconfig"
+if [ -f "$DEFCONFIG_PATH" ]; then
   # 无线子系统核心(缺了内核就没有 wifi 能力)
-  grep -q '^CONFIG_CFG80211=' "$FRAG_PATH" || echo "CONFIG_CFG80211=m" >> "$FRAG_PATH"
-  grep -q '^CONFIG_MAC80211=' "$FRAG_PATH" || echo "CONFIG_MAC80211=m" >> "$FRAG_PATH"
+  grep -q '^CONFIG_CFG80211=' "$DEFCONFIG_PATH" || echo "CONFIG_CFG80211=m" >> "$DEFCONFIG_PATH"
+  grep -q '^CONFIG_MAC80211=' "$DEFCONFIG_PATH" || echo "CONFIG_MAC80211=m" >> "$DEFCONFIG_PATH"
   # 关闭 GKI 模块符号保护(群友方案:让小米原厂签名模块能加载)
-  grep -q '^CONFIG_MODULE_SIG=' "$FRAG_PATH" || echo "CONFIG_MODULE_SIG=y" >> "$FRAG_PATH"
-  grep -q '^CONFIG_MODULE_SIG_FORCE=' "$FRAG_PATH" || echo "CONFIG_MODULE_SIG_FORCE=n" >> "$FRAG_PATH"
-  grep -q '^CONFIG_MODULE_SIG_PROTECT=' "$FRAG_PATH" || echo "CONFIG_MODULE_SIG_PROTECT=n" >> "$FRAG_PATH"
-  echo "已注入 CFG80211 / MAC80211 / MODULE_SIG 系列"
+  grep -q '^CONFIG_MODULE_SIG=' "$DEFCONFIG_PATH" || echo "CONFIG_MODULE_SIG=y" >> "$DEFCONFIG_PATH"
+  grep -q '^CONFIG_MODULE_SIG_FORCE=' "$DEFCONFIG_PATH" || echo "CONFIG_MODULE_SIG_FORCE=n" >> "$DEFCONFIG_PATH"
+  grep -q '^CONFIG_MODULE_SIG_PROTECT=' "$DEFCONFIG_PATH" || echo "CONFIG_MODULE_SIG_PROTECT=n" >> "$DEFCONFIG_PATH"
+  echo "已注入 CFG80211 / MAC80211 / MODULE_SIG 系列(gki_defconfig)"
 fi
+
+# ===== 修复 3b:中性化 check_defconfig,避免追加/错位配置触发 savedefconfig 不匹配 =====
+# 追加到 gki_defconfig 末尾的配置若不在 Kconfig 顺序位,会让构建期的 savedefconfig 校验失败。
+# 直接 sed 掉 build.config* 里的 check_defconfig 调用即可(沿用已验证的处置)。
+for f in "$KERNEL_ROOT"/common/build.config* "$KERNEL_ROOT"/build.config*; do
+  [ -f "$f" ] || continue
+  sed -i '/check_defconfig/d' "$f" 2>/dev/null || true
+done
+echo "已中性化 build.config* 中的 check_defconfig"
