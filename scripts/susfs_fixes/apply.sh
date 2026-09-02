@@ -359,33 +359,25 @@ if [ -f "$DEFCONFIG_PATH" ] && ! grep -q "^CONFIG_USER_NS=y" "$DEFCONFIG_PATH"; 
   echo "已启用 CONFIG_USER_NS"
 fi
 
-# ===== 修复 3:关闭小米模块保护(修 WiFi/蓝牙/声音/震动 -EACCES) =====
-# 关键结论(对照原厂 stock_kernel_config.txt vs 自编译 custom_config.gz):
-#   两者的 CONFIG_MODULE_SIG_PROTECT 都是 =y,区别是 key:原厂签的是 OEM key,
-#   自编译用自动生成的新 key,于是 protected_module_names_list 里的原厂 vendor 模块
-#   (qca_cld3_wcn7750 / icnss / cnss 等)被内核拒载(-EACCES)。改 =n 放行。
-#   只改"值"、不改行位置,才不触发 savedefconfig 校验;CFG80211/MAC80211 原厂本就在
-#   vendor_dlkm 里以 .ko 提供,无需(也不应)写进树内,故这里不再注入。
-DEFCONFIG_PATH="$KERNEL_ROOT/common/arch/arm64/configs/gki_defconfig"
-if [ -f "$DEFCONFIG_PATH" ]; then
-  if grep -q '^CONFIG_MODULE_SIG_PROTECT=' "$DEFCONFIG_PATH"; then
-    sed -i 's|^CONFIG_MODULE_SIG_PROTECT=.*|CONFIG_MODULE_SIG_PROTECT=n|' "$DEFCONFIG_PATH"
-  else
-    echo 'CONFIG_MODULE_SIG_PROTECT=n' >> "$DEFCONFIG_PATH"
-  fi
-  echo "已关闭 CONFIG_MODULE_SIG_PROTECT(=n)"
-fi
+# ===== 修复 3(作废):CONFIG_MODULE_SIG_PROTECT 不存在于 AOSP GKI 树 =====
+# 实测:往 gki_defconfig 写 CONFIG_MODULE_SIG_PROTECT=n 会被 make savedefconfig 整个丢弃
+#   (不是转成 "# ... is not set",而是符号未知直接消失),导致 savedefconfig mismatch 编译失败。
+#   MODULE_SIG_PROTECT 是小米 MIUI 私有符号,AOSP GKI 没有它,"关它放行原厂模块"是死路。
+#   原厂 vendor 模块加载失败的真因需用 dmesg 重新定位(disagrees about version / required key)。
 
-# ===== 修复 4:对齐 LOCALVERSION(修 vermagic 不匹配) =====
-# 关键结论:原厂是 CONFIG_LOCALVERSION="-4k"(不是 -android16-6-4k)。
-#   "-android16-6" 是 GKI 构建系统按 BRANCH/KMI 自动加的前缀,不该写进 LOCALVERSION;
-#   你自编译那份写成了 "-android16-6-4k" = 双重前缀,vermagic 才对不上。
+# ===== 修复 4:对齐 LOCALVERSION(修 vermagic,需先验证再决定) =====
+# 机制约束:本构建只支持"纯新增"注入(diff 只抓 > 新增行),不支持"改已有项的值"
+#   (改值会被 cp .orig 还原,导致 savedefconfig mismatch)。所以:
+#   - 若 gki_defconfig 里本没有 CONFIG_LOCALVERSION=,append 是纯新增,走 fragment 生效。
+#   - 若已存在,说明值来自 defconfig 或构建系统(KMI/BRANCH 自动生成),改值需直接改 .orig 或另行处理。
+# 原厂值是 CONFIG_LOCALVERSION="-4k"(见 stock_kernel_config.txt),自编译当前是 "-android16-6-4k"。
+# 最稳做法:先 modinfo qca_cld3_wcn7750.ko | grep vermagic + uname -r 比对,确认要 -4k 再动。
 DEFCONFIG_PATH="$KERNEL_ROOT/common/arch/arm64/configs/gki_defconfig"
 if [ -f "$DEFCONFIG_PATH" ]; then
   if grep -q '^CONFIG_LOCALVERSION=' "$DEFCONFIG_PATH"; then
-    sed -i 's|^CONFIG_LOCALVERSION=.*|CONFIG_LOCALVERSION="-4k"|' "$DEFCONFIG_PATH"
+    echo "::warning::gki_defconfig 已含 CONFIG_LOCALVERSION,值改动会被 diff->fragment 机制遗漏/破坏,请先验证 vermagic 再手动处理"
   else
     echo 'CONFIG_LOCALVERSION="-4k"' >> "$DEFCONFIG_PATH"
+    echo "已新增 CONFIG_LOCALVERSION=-4k(纯新增,走 fragment 生效)"
   fi
-  echo "已对齐 CONFIG_LOCALVERSION=-4k(与原厂一致)"
 fi
