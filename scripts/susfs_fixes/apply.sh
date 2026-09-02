@@ -138,6 +138,20 @@ if [ "$SUSFS_REJ_COUNT" -gt 0 ]; then
   find . -name '*.rej' -print
 fi
 
+# 主补丁产生 .rej 后,对已知的 Android 16 6.12 上下文漂移 hunk 重新打(避免 SUSFS 功能缺失)
+# 已知 case:task_mmu.c show_smap() 的 SUS_MAP 早返回 hunk,补丁期望 vma_pages 上下文,
+#   6.12 源码已改 vma_data_pages,导致 patch -p1 产生 .rej(只有这 1 个 hunk 失败)
+if [[ "$ANDROID_VERSION" == "android16" && "$KERNEL_VERSION" == "6.12" ]]; then
+  TASK_MMU="$KERNEL_ROOT/common/fs/proc/task_mmu.c"
+  if [ -f "$TASK_MMU" ] && grep -q 'if (!vma_data_pages(vma))' "$TASK_MMU" \
+     && ! grep -B 10 'if (!vma_data_pages(vma))' "$TASK_MMU" | grep -q 'SUSFS_IS_INODE_SUS_MAP'; then
+    perl -i -0pe 's|(struct mem_size_stats mss = \{\};\n)\n(\s*if \(!vma_data_pages)|$1\n#ifdef CONFIG_KSU_SUSFS_SUS_MAP\n\tif (vma->vm_file) {\n\t\tif (SUSFS_IS_INODE_SUS_MAP(file_inode(vma->vm_file)))\n\t\t\treturn 0;\n\t}\n#endif // #ifdef CONFIG_KSU_SUSFS_SUS_MAP\n\n$2|s' "$TASK_MMU"
+    echo "已修复 Android 16 6.12 task_mmu.c show_smap 缺 SUSFS SUS_MAP 早返回(补丁 hunk 上下文漂移手工补回)"
+    # 顺手清掉对应的 .rej
+    rm -f "$TASK_MMU.rej" 2>/dev/null || true
+  fi
+fi
+
 # 主补丁应用后还原临时上下文，避免无关源码差异保留到最终产物
 if [[ "$ANDROID_VERSION" == "android12" && "$KERNEL_VERSION" == "5.10" ]]; then
   if [[ "$CURRENT_SUB" -le 43 ]]; then
